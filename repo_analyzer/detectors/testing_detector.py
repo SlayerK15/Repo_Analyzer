@@ -665,21 +665,23 @@ class TestingDetector:
             # Find maximum number of matches for normalization
             max_matches = max(testing_matches.values())
             
-            for framework, matches in testing_matches.items():
-                # Calculate confidence score (0-100)
-                confidence = min(100, (matches / max_matches) * 100)
-                
-                # Only include frameworks with reasonable confidence
-                # Increased threshold from 15 to 40 to reduce false positives
-                if confidence >= 40:
-                    # Keep only unique evidence and limit to 5 examples
-                    unique_evidence = list(dict.fromkeys(testing_evidence[framework]))[:5]
+            # Only proceed if we have actual matches (avoid division by zero)
+            if max_matches > 0:
+                for framework, matches in testing_matches.items():
+                    # Calculate confidence score (0-100)
+                    confidence = min(100, (matches / max_matches) * 100)
                     
-                    testing_frameworks[framework] = {
-                        "matches": matches,
-                        "confidence": round(confidence, 2),
-                        "category": testing_categories.get(framework, "general"),
-                        "evidence": unique_evidence
-                    }
+                    # Only include frameworks with reasonable confidence
+                    # Increased threshold from 15 to 40 to reduce false positives
+                    if confidence >= 40:
+                        # Keep only unique evidence and limit to 5 examples
+                        unique_evidence = list(dict.fromkeys(testing_evidence[framework]))[:5]
+                        
+                        testing_frameworks[framework] = {
+                            "matches": matches,
+                            "confidence": round(confidence, 2),
+                            "category": testing_categories.get(framework, "general"),
+                            "evidence": unique_evidence
+                        }
         
         return testing_frameworks

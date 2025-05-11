@@ -191,6 +191,52 @@ class BuildDetector:
             files: List of file paths
             files_content: Dict mapping file paths to their content
         """
+        # Special handling for mixed repositories: look through all subdirectories
+        # and see if there are separate frontend and backend directories
+        has_frontend_backend_split = False
+        frontend_dir = None
+        backend_dir = None
+        
+        # Check for common frontend/backend directory patterns
+        common_structures = [
+            ("frontend", "backend"),
+            ("client", "server"),
+            ("ui", "api"),
+            ("app", "api"),
+            ("web", "api")
+        ]
+        
+        # Get first-level directories
+        first_level_dirs = set()
+        for file_path in files:
+            parts = file_path.split(os.sep)
+            if len(parts) > 1:
+                first_level_dirs.add(parts[0])
+        
+        # Check if any common frontend/backend pattern exists
+        for front, back in common_structures:
+            if front in first_level_dirs and back in first_level_dirs:
+                has_frontend_backend_split = True
+                frontend_dir = front
+                backend_dir = back
+                break
+        
+        # If we have a frontend/backend split, adjust package manager detections
+        if has_frontend_backend_split:
+            # Check for package.json in frontend directory
+            frontend_has_npm = any(f.startswith(frontend_dir) and os.path.basename(f) == "package.json" for f in files)
+            
+            # Check for requirements.txt in backend directory
+            backend_has_pip = any(f.startswith(backend_dir) and os.path.basename(f) == "requirements.txt" for f in files)
+            
+            # If frontend has npm-related files, boost npm confidence
+            if frontend_has_npm:
+                package_matches["npm"] = package_matches.get("npm", 0) + 30
+            
+            # If backend has pip-related files, boost pip confidence
+            if backend_has_pip:
+                package_matches["pip"] = package_matches.get("pip", 0) + 30
+        
         # Check for actual usage of build systems and package managers
         for system, patterns in self.usage_indicators.items():
             # Look in shell scripts, GitHub workflows, and other CI configurations
@@ -221,8 +267,8 @@ class BuildDetector:
                     if found_usage:
                         break
         
-        # Validate npm/Yarn by checking if package.json exists and has content
-        if "npm" in package_matches or "Yarn" in package_matches:
+        # Validate npm by checking if package.json exists and has content
+        if "npm" in package_matches or any(file.endswith("package.json") for file in files):
             has_package_json = False
             has_dependencies = False
             
@@ -237,23 +283,22 @@ class BuildDetector:
                         pass
                     break
             
-            if not has_package_json:
-                if "npm" in package_matches:
-                    package_matches["npm"] = package_matches["npm"] // 2
-                if "Yarn" in package_matches:
-                    package_matches["Yarn"] = package_matches["Yarn"] // 2
-            elif not has_dependencies:
-                if "npm" in package_matches:
-                    package_matches["npm"] = package_matches["npm"] // 3
-                if "Yarn" in package_matches:
-                    package_matches["Yarn"] = package_matches["npm"] // 3
+            if has_package_json:
+                # Even if just the file exists, boost npm confidence
+                package_matches["npm"] = package_matches.get("npm", 0) + 20
+                
+                # If it has dependencies, boost further
+                if has_dependencies:
+                    package_matches["npm"] = package_matches.get("npm", 0) + 10
         
         # Validate pip by checking if requirements.txt or setup.py has actual dependencies
-        if "pip" in package_matches:
+        if "pip" in package_matches or any(file.endswith(("requirements.txt", "setup.py")) for file in files):
             has_valid_pip_file = False
             
             for file_path, content in files_content.items():
                 if file_path.endswith('requirements.txt') or file_path.endswith('setup.py'):
+                    has_valid_pip_file = True
+                    
                     # Check if requirements.txt has package names
                     if file_path.endswith('requirements.txt'):
                         # Requirements.txt should have at least one line with a package name
@@ -261,19 +306,17 @@ class BuildDetector:
                         for line in lines:
                             line = line.strip()
                             if line and not line.startswith('#') and '=' in line:
-                                has_valid_pip_file = True
+                                package_matches["pip"] = package_matches.get("pip", 0) + 10
                                 break
                     
                     # Check if setup.py has install_requires
                     elif file_path.endswith('setup.py'):
                         if 'install_requires' in content and '[' in content and ']' in content:
-                            has_valid_pip_file = True
-                    
-                    if has_valid_pip_file:
-                        break
+                            package_matches["pip"] = package_matches.get("pip", 0) + 10
             
-            if not has_valid_pip_file:
-                package_matches["pip"] = package_matches["pip"] // 2
+            if has_valid_pip_file:
+                # Even if just the file exists, boost pip confidence
+                package_matches["pip"] = package_matches.get("pip", 0) + 20
         
         # Validate Maven by checking if pom.xml has proper Maven structure
         if "Maven" in build_matches or "Maven" in package_matches:
@@ -324,28 +367,11 @@ class BuildDetector:
             if not has_valid_webpack:
                 build_matches["Webpack"] = build_matches["Webpack"] // 2
         
-        # Check for multiple "competing" build systems
-        # If more than one build system exists, favor the ones with stronger evidence
-        if len(build_matches) > 1:
-            # Sort by match count
-            sorted_systems = sorted(build_matches.items(), key=lambda x: x[1], reverse=True)
-            
-            # If the top system has more than 2x the matches of the second system,
-            # reduce the confidence of all other systems
-            if len(sorted_systems) >= 2 and sorted_systems[0][1] > sorted_systems[1][1] * 2:
-                for system, _ in sorted_systems[1:]:
-                    build_matches[system] = build_matches[system] // 2
-        
-        # Similar check for package managers
-        if len(package_matches) > 1:
-            # Sort by match count
-            sorted_managers = sorted(package_matches.items(), key=lambda x: x[1], reverse=True)
-            
-            # If the top manager has more than 2x the matches of the second manager,
-            # reduce the confidence of all other managers
-            if len(sorted_managers) >= 2 and sorted_managers[0][1] > sorted_managers[1][1] * 2:
-                for manager, _ in sorted_managers[1:]:
-                    package_matches[manager] = package_matches[manager] // 2
+        # Lower threshold for npm in mixed repositories
+        # If both pip and npm have some evidence but below threshold, boost both
+        if "pip" in package_matches and package_matches.get("npm", 0) > 0:
+            # This is likely a mixed repository, so keep npm even with lower confidence
+            package_matches["npm"] = max(package_matches["npm"], 10)
     
     def detect(self, files: List[str], files_content: Dict[str, str]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
         """
@@ -397,6 +423,16 @@ class BuildDetector:
                 elif any(pattern in file_path for pattern in filenames):
                     package_matches[manager] += 5  # Lower weight for path match
                     package_evidence[manager].append(f"Found pattern in path: {file_path}")
+            
+            # Special case for package.json to detect npm
+            if filename == "package.json":
+                package_matches["npm"] += 20  # Higher weight for package.json
+                package_evidence["npm"].append(f"Found file: {filename}")
+            
+            # Special case for requirements.txt to detect pip
+            if filename == "requirements.txt":
+                package_matches["pip"] += 20  # Higher weight for requirements.txt
+                package_evidence["pip"].append(f"Found file: {filename}")
         
         # Step 2: Check file content for build system and package manager patterns
         for file_path, content in files_content.items():
@@ -417,7 +453,7 @@ class BuildDetector:
                         if matches and len(matches[0]) > 60:  # Truncate long matches
                             match_text = matches[0][:57] + "..."
                         else:
-                            match_text = matches[0]
+                            match_text = str(matches[0]) if matches else pattern
                         build_evidence[system].append(f"Pattern match: {match_text}")
             
             # Check for package manager patterns
@@ -433,7 +469,7 @@ class BuildDetector:
                         if matches and len(matches[0]) > 60:  # Truncate long matches
                             match_text = matches[0][:57] + "..."
                         else:
-                            match_text = matches[0]
+                            match_text = str(matches[0]) if matches else pattern
                         package_evidence[manager].append(f"Pattern match: {match_text}")
         
         # Step 3: Apply context validation to reduce false positives
@@ -444,14 +480,13 @@ class BuildDetector:
         
         if build_matches:
             # Find maximum number of matches for normalization
-            max_build_matches = max(build_matches.values())
+            max_build_matches = max(build_matches.values()) if build_matches else 1
             
             for system, matches in build_matches.items():
                 # Calculate confidence score (0-100)
                 confidence = min(100, (matches / max_build_matches) * 100)
                 
                 # Only include build systems with reasonable confidence
-                # Increased threshold from 15 to 35 to reduce false positives
                 if confidence >= 35:
                     # Keep only unique evidence and limit to 5 examples
                     unique_evidence = list(set(build_evidence[system]))[:5]
@@ -467,15 +502,17 @@ class BuildDetector:
         
         if package_matches:
             # Find maximum number of matches for normalization
-            max_package_matches = max(package_matches.values())
+            max_package_matches = max(package_matches.values()) if package_matches else 1
             
             for manager, matches in package_matches.items():
                 # Calculate confidence score (0-100)
                 confidence = min(100, (matches / max_package_matches) * 100)
                 
+                # Lower threshold for npm in mixed repositories
+                threshold = 25 if manager == "npm" else 35
+                
                 # Only include package managers with reasonable confidence
-                # Increased threshold from 15 to 35 to reduce false positives
-                if confidence >= 35:
+                if confidence >= threshold:
                     # Keep only unique evidence and limit to 5 examples
                     unique_evidence = list(set(package_evidence[manager]))[:5]
                     

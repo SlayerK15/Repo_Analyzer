@@ -1,0 +1,111 @@
+{
+  "languages": {
+    "React/JavaScript": {
+      "count": 20,
+      "percentage": 43.48,
+      "confidence": 86.96
+    },
+    "JavaScript": {
+      "count": 9,
+      "percentage": 19.57,
+      "confidence": 39.13
+    },
+    "SCSS": {
+      "count": 4,
+      "percentage": 8.7,
+      "confidence": 17.39
+    }
+  },
+  "frameworks": {
+    "Next.js": {
+      "matches": 158,
+      "confidence": 30.98,
+      "evidence": [
+        "Found pattern in filename: next.config.mjs",
+        "Found pattern in path: src/pages/index.js",
+        "Found pattern in path: src/pages/_document.js",
+        "Found file: _document.js",
+        "Found pattern in path: src/pages/contact.jsx",
+        "Warning: Framework may not be compatible with detected languages: React/JavaScript"
+      ]
+    },
+    "React": {
+      "matches": 255,
+      "confidence": 100,
+      "evidence": [
+        "Found pattern in filename: ParallaxImage.jsx",
+        "Found pattern in filename: splitWrapper.jsx",
+        "Found pattern in filename: contact.jsx",
+        "Found pattern in filename: portfolio.jsx",
+        "Found pattern in filename: about.jsx"
+      ]
+    }
+  },
+  "databases": {},
+  "build_systems": {
+    "tsc": {
+      "matches": 18,
+      "confidence": 100,
+      "evidence": [
+        "Pattern match: \"module\":",
+        "Pattern match: \"target\":",
+        "Found file: tsconfig.json",
+        "Pattern match: \"compilerOptions\":"
+      ]
+    }
+  },
+  "package_managers": {
+    "npm": {
+      "matches": 436,
+      "confidence": 100,
+      "evidence": [
+        "Pattern match: \"devDependencies\":",
+        "Pattern match: npm install",
+        "Pattern match: \"dependencies\":",
+        "Found file: package.json",
+        "Pattern match: \"scripts\":"
+      ]
+    }
+  },
+  "frontend": {
+    "React": {
+      "matches": 208,
+      "confidence": 100,
+      "category": "framework",
+      "evidence": [
+        "Found pattern in filename: ParallaxImage.jsx",
+        "Found pattern in filename: splitWrapper.jsx",
+        "Found pattern in filename: contact.jsx",
+        "Found pattern in filename: portfolio.jsx",
+        "Found pattern in filename: about.jsx"
+      ]
+    },
+    "Angular": {
+      "matches": 81,
+      "confidence": 38.94,
+      "category": "framework",
+      "evidence": [
+        "Pattern match: n",
+        "Pattern match: e",
+        "Pattern match: o"
+      ]
+    }
+  },
+  "devops": {},
+  "architecture": {},
+  "testing": {},
+  "primary_technologies": {
+    "languages": "React/JavaScript",
+    "frameworks": "React",
+    "build_systems": "tsc",
+    "package_managers": "npm",
+    "frontend": "React"
+  },
+  "metadata": {
+    "repo_path": "/home/kanav/Desktop/infrawave-version3",
+    "file_count": 68,
+    "content_analyzed_count": 42,
+    "analysis_time_seconds": 0.50572,
+    "analyzed_at": "2025-05-11 10:54:59.486768"
+  }
+}

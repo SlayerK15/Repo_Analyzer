@@ -51,7 +51,8 @@ class FrameworkDetector:
             ],
             "SQLAlchemy": [
                 "sqlalchemy", "from sqlalchemy import", "import sqlalchemy",
-                "Base = declarative_base()", "Column(", "relationship("
+                "Base = declarative_base()", "Column(", "relationship(",
+                "db.Column", "db.relationship", "flask_sqlalchemy"
             ],
             "Celery": [
                 "celery", "from celery import", "import celery",
@@ -240,7 +241,8 @@ class FrameworkDetector:
             ],
             "SQLAlchemy": [
                 r"from\s+sqlalchemy\s+import", r"class\s+\w+\(.*Base\)",
-                r"Base\s*=\s*declarative_base\(\)"
+                r"Base\s*=\s*declarative_base\(\)", r"db\s*=\s*SQLAlchemy\(",
+                r"Column\(", r"relationship\(", r"flask_sqlalchemy"
             ],
             "React": [
                 r"import\s+React\s+from", r"React\.Component", r"useState\(", 
@@ -395,6 +397,22 @@ class FrameworkDetector:
                     break
             if not found_react_patterns:
                 framework_matches["React"] = framework_matches["React"] // 2
+        
+        # Special case for SQLAlchemy: Make sure it's detected in Flask apps
+        if "Flask" in framework_matches and "SQLAlchemy" in framework_matches:
+            # If both Flask and SQLAlchemy are detected, boost SQLAlchemy confidence
+            flask_confidence = framework_matches["Flask"]
+            framework_matches["SQLAlchemy"] = max(framework_matches["SQLAlchemy"], flask_confidence * 0.8)
+            
+            # Check for Flask-SQLAlchemy usage
+            has_flask_sqlalchemy = False
+            for _, content in files_content.items():
+                if "flask_sqlalchemy" in content or "SQLAlchemy(app)" in content:
+                    has_flask_sqlalchemy = True
+                    break
+            
+            if has_flask_sqlalchemy:
+                framework_matches["SQLAlchemy"] = max(framework_matches["SQLAlchemy"], flask_confidence * 0.9)
     
     def detect(self, files: List[str], files_content: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
         """
@@ -437,7 +455,47 @@ class FrameworkDetector:
                         framework_matches[framework] += 2  # Lower weight for path match
                         framework_evidence[framework].append(f"Found pattern in path: {file_path}")
         
-        # Step 2: Check file content for framework patterns
+        # Step 2: Check for specific framework dependencies in requirements.txt or package.json
+        for file_path, content in files_content.items():
+            filename = os.path.basename(file_path)
+            
+            # Check requirements.txt for Python frameworks
+            if filename == "requirements.txt":
+                python_frameworks = {
+                    "Django": ["django"],
+                    "Flask": ["flask"],
+                    "FastAPI": ["fastapi"],
+                    "Pyramid": ["pyramid"],
+                    "Tornado": ["tornado"],
+                    "SQLAlchemy": ["sqlalchemy", "flask-sqlalchemy", "flask_sqlalchemy"],
+                    "Celery": ["celery"]
+                }
+                
+                for framework, patterns in python_frameworks.items():
+                    for pattern in patterns:
+                        if pattern in content.lower():
+                            framework_matches[framework] += 15  # High weight for dependency
+                            framework_evidence[framework].append(f"Found pattern: {pattern} in {filename}")
+            
+            # Check package.json for JavaScript frameworks
+            elif filename == "package.json":
+                js_frameworks = {
+                    "React": ["react", "react-dom"],
+                    "Vue.js": ["vue"],
+                    "Angular": ["@angular/core"],
+                    "Next.js": ["next"],
+                    "Express": ["express"],
+                    "NestJS": ["@nestjs/core"],
+                    "Svelte": ["svelte"]
+                }
+                
+                for framework, patterns in js_frameworks.items():
+                    for pattern in patterns:
+                        if f'"{pattern}"' in content:
+                            framework_matches[framework] += 15  # High weight for dependency
+                            framework_evidence[framework].append(f"Found dependency: {pattern} in {filename}")
+        
+        # Step 3: Check file content for framework patterns
         for file_path, content in files_content.items():
             # Skip checking large files for performance reasons
             if len(content) > 500000:  # Skip files larger than 500KB
@@ -468,7 +526,7 @@ class FrameworkDetector:
                             framework_matches[framework] += occurrences
                             framework_evidence[framework].append(f"Found pattern: {pattern} in {os.path.basename(file_path)}")
         
-        # Step 3: Apply context validation to reduce false positives
+        # Step 4: Apply context validation to reduce false positives
         self._apply_context_validation(framework_matches, files_content)
         
         # Calculate confidence scores and prepare results
@@ -484,8 +542,9 @@ class FrameworkDetector:
                 confidence = min(100, (matches / max_matches) * 100)
                 
                 # Only include frameworks with reasonable confidence
-                # Increased threshold from 10 to 35 to reduce false positives
-                if confidence >= 35:
+                # A threshold of 35 to reduce false positives, but allow SQLAlchemy with lower confidence
+                threshold = 20 if framework == "SQLAlchemy" else 35
+                if confidence >= threshold:
                     # Keep only unique evidence and limit to 5 examples
                     unique_evidence = list(dict.fromkeys(framework_evidence[framework]))[:5]
                     
