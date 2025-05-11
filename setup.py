@@ -9,7 +9,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="repo-analyzer",
-    version="0.1.0",
+    version="0.2.0",
     author="Your Name",
     author_email="your.email@example.com",
     description="A Python library that analyzes code repositories to identify tech stacks",
@@ -32,9 +32,22 @@ setup(
     ],
     python_requires=">=3.8",
     install_requires=[],
+    extras_require={
+        'ai': [
+            'openai>=1.0.0',
+            'anthropic>=0.5.0',
+            'tiktoken>=0.4.0',
+            'huggingface_hub>=0.16.0',
+        ],
+        'local_ai': [
+            'llama-cpp-python>=0.2.0',
+            'sentence-transformers>=2.2.2',
+        ]
+    },
     entry_points={
         "console_scripts": [
-            "repo-analyzer=repo_analyzer.analyzer:main",
+            "repo-analyzer=repo_analyzer.cli:main",
+            "repo-analyzer-ai=repo_analyzer.cli_enhanced:main",
         ],
     },
 )
