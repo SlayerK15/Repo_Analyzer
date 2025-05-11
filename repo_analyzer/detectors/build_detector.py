@@ -8,6 +8,7 @@ other artifacts that indicate how the project is built and its dependencies mana
 
 import os
 import re
+import json
 from collections import defaultdict
 from typing import Dict, List, Any, Tuple
 
@@ -147,6 +148,204 @@ class BuildDetector:
                 r"composer\s+(?:install|update|require)"
             ]
         }
+        
+        # Build system and package manager usage indicators
+        self.usage_indicators = {
+            "Maven": [
+                r"mvn\s+clean", r"mvn\s+compile", r"mvn\s+install", r"mvn\s+deploy", 
+                r"./mvnw", r"mvn\s+package"
+            ],
+            "Gradle": [
+                r"gradle\s+build", r"./gradlew", r"gradlew.bat", r"gradle\s+assemble",
+                r"gradle\s+clean", r"gradle\s+test"
+            ],
+            "Make": [
+                r"make\s+all", r"make\s+clean", r"make\s+install", r"make\s+test"
+            ],
+            "npm": [
+                r"npm\s+install", r"npm\s+ci", r"npm\s+run", r"npm\s+start", 
+                r"npm\s+test", r"npm\s+build"
+            ],
+            "Yarn": [
+                r"yarn\s+install", r"yarn\s+add", r"yarn\s+run", r"yarn\s+start",
+                r"yarn\s+test", r"yarn\s+build"
+            ],
+            "pip": [
+                r"pip\s+install", r"pip\s+install\s+-r", r"python\s+-m\s+pip"
+            ],
+            "Cargo": [
+                r"cargo\s+build", r"cargo\s+run", r"cargo\s+test"
+            ],
+            "Go Modules": [
+                r"go\s+build", r"go\s+install", r"go\s+run", r"go\s+test"
+            ]
+        }
+    
+    def _apply_context_validation(self, build_matches, package_matches, files, files_content):
+        """
+        Apply context-aware validation to reduce false positives in build system and package manager detection.
+        
+        Args:
+            build_matches: Dict of build system matches and their counts
+            package_matches: Dict of package manager matches and their counts
+            files: List of file paths
+            files_content: Dict mapping file paths to their content
+        """
+        # Check for actual usage of build systems and package managers
+        for system, patterns in self.usage_indicators.items():
+            # Look in shell scripts, GitHub workflows, and other CI configurations
+            potential_files = []
+            for file_path in files:
+                if (file_path.endswith('.sh') or 
+                    '.github/workflows/' in file_path or 
+                    file_path.endswith('.yml') or 
+                    file_path.endswith('.yaml') or
+                    'jenkins' in file_path.lower() or
+                    'travis' in file_path.lower() or
+                    'gitlab-ci' in file_path.lower() or
+                    'dockerfile' in file_path.lower()):
+                    potential_files.append(file_path)
+            
+            found_usage = False
+            for file_path in potential_files:
+                if file_path in files_content:
+                    content = files_content[file_path]
+                    for pattern in patterns:
+                        if re.search(pattern, content):
+                            found_usage = True
+                            if system in build_matches:
+                                build_matches[system] += 10  # Strong evidence of usage
+                            if system in package_matches:
+                                package_matches[system] += 10
+                            break
+                    if found_usage:
+                        break
+        
+        # Validate npm/Yarn by checking if package.json exists and has content
+        if "npm" in package_matches or "Yarn" in package_matches:
+            has_package_json = False
+            has_dependencies = False
+            
+            for file_path, content in files_content.items():
+                if file_path.endswith('package.json'):
+                    has_package_json = True
+                    try:
+                        package_data = json.loads(content)
+                        if ('dependencies' in package_data or 'devDependencies' in package_data):
+                            has_dependencies = True
+                    except:
+                        pass
+                    break
+            
+            if not has_package_json:
+                if "npm" in package_matches:
+                    package_matches["npm"] = package_matches["npm"] // 2
+                if "Yarn" in package_matches:
+                    package_matches["Yarn"] = package_matches["Yarn"] // 2
+            elif not has_dependencies:
+                if "npm" in package_matches:
+                    package_matches["npm"] = package_matches["npm"] // 3
+                if "Yarn" in package_matches:
+                    package_matches["Yarn"] = package_matches["npm"] // 3
+        
+        # Validate pip by checking if requirements.txt or setup.py has actual dependencies
+        if "pip" in package_matches:
+            has_valid_pip_file = False
+            
+            for file_path, content in files_content.items():
+                if file_path.endswith('requirements.txt') or file_path.endswith('setup.py'):
+                    # Check if requirements.txt has package names
+                    if file_path.endswith('requirements.txt'):
+                        # Requirements.txt should have at least one line with a package name
+                        lines = content.strip().split('\n')
+                        for line in lines:
+                            line = line.strip()
+                            if line and not line.startswith('#') and '=' in line:
+                                has_valid_pip_file = True
+                                break
+                    
+                    # Check if setup.py has install_requires
+                    elif file_path.endswith('setup.py'):
+                        if 'install_requires' in content and '[' in content and ']' in content:
+                            has_valid_pip_file = True
+                    
+                    if has_valid_pip_file:
+                        break
+            
+            if not has_valid_pip_file:
+                package_matches["pip"] = package_matches["pip"] // 2
+        
+        # Validate Maven by checking if pom.xml has proper Maven structure
+        if "Maven" in build_matches or "Maven" in package_matches:
+            has_valid_pom = False
+            
+            for file_path, content in files_content.items():
+                if file_path.endswith('pom.xml'):
+                    if ('<project' in content and 
+                        ('<groupId>' in content or '<parent>' in content) and 
+                        '<artifactId>' in content):
+                        has_valid_pom = True
+                        break
+            
+            if not has_valid_pom:
+                if "Maven" in build_matches:
+                    build_matches["Maven"] = build_matches["Maven"] // 2
+                if "Maven" in package_matches:
+                    package_matches["Maven"] = package_matches["Maven"] // 2
+        
+        # Validate Gradle by checking if build.gradle has repositories and dependencies
+        if "Gradle" in build_matches or "Gradle" in package_matches:
+            has_valid_gradle = False
+            
+            for file_path, content in files_content.items():
+                if file_path.endswith('build.gradle') or file_path.endswith('build.gradle.kts'):
+                    if ('repositories' in content and 
+                        'dependencies' in content):
+                        has_valid_gradle = True
+                        break
+            
+            if not has_valid_gradle:
+                if "Gradle" in build_matches:
+                    build_matches["Gradle"] = build_matches["Gradle"] // 2
+                if "Gradle" in package_matches:
+                    package_matches["Gradle"] = package_matches["Gradle"] // 2
+        
+        # Validate Webpack by checking webpack.config.js
+        if "Webpack" in build_matches:
+            has_valid_webpack = False
+            
+            for file_path, content in files_content.items():
+                if 'webpack' in file_path.lower() and file_path.endswith('.js'):
+                    if ('module.exports' in content and 
+                        ('entry' in content or 'output' in content or 'module' in content)):
+                        has_valid_webpack = True
+                        break
+            
+            if not has_valid_webpack:
+                build_matches["Webpack"] = build_matches["Webpack"] // 2
+        
+        # Check for multiple "competing" build systems
+        # If more than one build system exists, favor the ones with stronger evidence
+        if len(build_matches) > 1:
+            # Sort by match count
+            sorted_systems = sorted(build_matches.items(), key=lambda x: x[1], reverse=True)
+            
+            # If the top system has more than 2x the matches of the second system,
+            # reduce the confidence of all other systems
+            if len(sorted_systems) >= 2 and sorted_systems[0][1] > sorted_systems[1][1] * 2:
+                for system, _ in sorted_systems[1:]:
+                    build_matches[system] = build_matches[system] // 2
+        
+        # Similar check for package managers
+        if len(package_matches) > 1:
+            # Sort by match count
+            sorted_managers = sorted(package_matches.items(), key=lambda x: x[1], reverse=True)
+            
+            # If the top manager has more than 2x the matches of the second manager,
+            # reduce the confidence of all other managers
+            if len(sorted_managers) >= 2 and sorted_managers[0][1] > sorted_managers[1][1] * 2:
+                for manager, _ in sorted_managers[1:]:
+                    package_matches[manager] = package_matches[manager] // 2
     
     def detect(self, files: List[str], files_content: Dict[str, str]) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
         """
@@ -237,7 +436,10 @@ class BuildDetector:
                             match_text = matches[0]
                         package_evidence[manager].append(f"Pattern match: {match_text}")
         
-        # Step 3: Calculate confidence scores for build systems
+        # Step 3: Apply context validation to reduce false positives
+        self._apply_context_validation(build_matches, package_matches, files, files_content)
+        
+        # Step 4: Calculate confidence scores for build systems
         build_systems = {}
         
         if build_matches:
@@ -249,7 +451,8 @@ class BuildDetector:
                 confidence = min(100, (matches / max_build_matches) * 100)
                 
                 # Only include build systems with reasonable confidence
-                if confidence >= 15:
+                # Increased threshold from 15 to 35 to reduce false positives
+                if confidence >= 35:
                     # Keep only unique evidence and limit to 5 examples
                     unique_evidence = list(set(build_evidence[system]))[:5]
                     
@@ -259,7 +462,7 @@ class BuildDetector:
                         "evidence": unique_evidence
                     }
         
-        # Step 4: Calculate confidence scores for package managers
+        # Step 5: Calculate confidence scores for package managers
         package_managers = {}
         
         if package_matches:
@@ -271,7 +474,8 @@ class BuildDetector:
                 confidence = min(100, (matches / max_package_matches) * 100)
                 
                 # Only include package managers with reasonable confidence
-                if confidence >= 15:
+                # Increased threshold from 15 to 35 to reduce false positives
+                if confidence >= 35:
                     # Keep only unique evidence and limit to 5 examples
                     unique_evidence = list(set(package_evidence[manager]))[:5]
                     
@@ -281,7 +485,7 @@ class BuildDetector:
                         "evidence": unique_evidence
                     }
         
-        # Step 5: Handle cross-listed technologies (e.g., Maven is both a build system and package manager)
+        # Step 6: Handle cross-listed technologies (e.g., Maven is both a build system and package manager)
         # Ensure consistency of confidence scores for technologies that appear in both categories
         for tech in set(build_systems.keys()).intersection(set(package_managers.keys())):
             build_conf = build_systems[tech]["confidence"]

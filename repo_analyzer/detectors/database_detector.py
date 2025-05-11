@@ -225,6 +225,145 @@ class DatabaseDetector:
                 r"cassandra\.yaml", r"cassandra-env\.sh"
             ]
         }
+        
+        # Connection code patterns (stronger evidence for actual database usage)
+        self.connection_patterns = {
+            "MySQL": [
+                r"mysql\.connect\(", r"MySqlConnection\(", r"new\s+MySqlConnection\(",
+                r"mysql\.createConnection\(", r"createPool\("
+            ],
+            "PostgreSQL": [
+                r"psycopg2\.connect\(", r"pg\.connect\(", r"new\s+Pool\(",
+                r"new\s+Client\(", r"NpgsqlConnection\("
+            ],
+            "SQLite": [
+                r"sqlite3\.connect\(", r"new\s+SqliteConnection\(", r"openDatabase\("
+            ],
+            "MongoDB": [
+                r"MongoClient\(", r"mongoose\.connect\(", r"mongodb\.MongoClient\."
+            ],
+            "Redis": [
+                r"redis\.createClient\(", r"new\s+RedisClient\(", r"Redis\.new\("
+            ],
+            "Elasticsearch": [
+                r"new\s+elasticsearch\.Client\(", r"new\s+Client\(\{", r"Elasticsearch\("
+            ],
+            "DynamoDB": [
+                r"new\s+AWS\.DynamoDB\(", r"DynamoDBClient\(", r"DynamoDBDocument\("
+            ]
+        }
+    
+    def _apply_context_validation(self, db_matches, evidence, files_content):
+        """Apply context-aware validation to reduce false positives in database detection."""
+        
+        # Check for actual connection/usage patterns
+        for db, patterns in self.connection_patterns.items():
+            if db in db_matches:
+                has_connection = False
+                
+                for _, content in files_content.items():
+                    if any(re.search(pattern, content) for pattern in patterns):
+                        has_connection = True
+                        evidence[db].append(f"Found database connection: {re.search(patterns[0], content).group() if re.search(patterns[0], content) else patterns[0]}")
+                        break
+                
+                if not has_connection:
+                    # If no connection pattern is found, reduce confidence
+                    db_matches[db] = db_matches[db] // 2
+        
+        # Check for environment variables in docker/docker-compose files
+        # which strongly indicate a database is being used
+        docker_files = [f for f in files_content.keys() if 'dockerfile' in f.lower() or 'docker-compose' in f.lower()]
+        for file_path in docker_files:
+            content = files_content[file_path]
+            
+            # Check for MySQL environment variables
+            if re.search(r"MYSQL_ROOT_PASSWORD|MYSQL_DATABASE|MYSQL_USER|MYSQL_PASSWORD", content):
+                db_matches["MySQL"] = db_matches.get("MySQL", 0) + 15
+                evidence["MySQL"].append(f"Found MySQL environment variables in {os.path.basename(file_path)}")
+            
+            # Check for PostgreSQL environment variables
+            if re.search(r"POSTGRES_PASSWORD|POSTGRES_USER|POSTGRES_DB|PGDATA", content):
+                db_matches["PostgreSQL"] = db_matches.get("PostgreSQL", 0) + 15
+                evidence["PostgreSQL"].append(f"Found PostgreSQL environment variables in {os.path.basename(file_path)}")
+            
+            # Check for MongoDB environment variables
+            if re.search(r"MONGO_INITDB_ROOT_USERNAME|MONGO_INITDB_ROOT_PASSWORD|MONGO_INITDB_DATABASE", content):
+                db_matches["MongoDB"] = db_matches.get("MongoDB", 0) + 15
+                evidence["MongoDB"].append(f"Found MongoDB environment variables in {os.path.basename(file_path)}")
+            
+            # Check for Redis environment variables
+            if re.search(r"REDIS_PASSWORD|REDIS_PORT|REDIS_HOST", content):
+                db_matches["Redis"] = db_matches.get("Redis", 0) + 15
+                evidence["Redis"].append(f"Found Redis environment variables in {os.path.basename(file_path)}")
+        
+        # Check for package.json dependencies for JavaScript projects
+        for file_path in files_content.keys():
+            if file_path.endswith('package.json'):
+                content = files_content[file_path]
+                
+                # Check for MySQL packages
+                if re.search(r'"mysql"|"mysql2"', content):
+                    db_matches["MySQL"] = db_matches.get("MySQL", 0) + 10
+                    evidence["MySQL"].append(f"Found MySQL dependency in package.json")
+                
+                # Check for PostgreSQL packages
+                if re.search(r'"pg"|"postgres"', content):
+                    db_matches["PostgreSQL"] = db_matches.get("PostgreSQL", 0) + 10
+                    evidence["PostgreSQL"].append(f"Found PostgreSQL dependency in package.json")
+                
+                # Check for MongoDB packages
+                if re.search(r'"mongodb"|"mongoose"', content):
+                    db_matches["MongoDB"] = db_matches.get("MongoDB", 0) + 10
+                    evidence["MongoDB"].append(f"Found MongoDB dependency in package.json")
+                
+                # Check for Redis packages
+                if re.search(r'"redis"', content):
+                    db_matches["Redis"] = db_matches.get("Redis", 0) + 10
+                    evidence["Redis"].append(f"Found Redis dependency in package.json")
+                
+                # Check for Elasticsearch packages
+                if re.search(r'"elasticsearch"|"@elastic/elasticsearch"', content):
+                    db_matches["Elasticsearch"] = db_matches.get("Elasticsearch", 0) + 10
+                    evidence["Elasticsearch"].append(f"Found Elasticsearch dependency in package.json")
+        
+        # Check for requirements.txt or Pipfile for Python projects
+        for file_path in files_content.keys():
+            if file_path.endswith('requirements.txt') or file_path.endswith('Pipfile'):
+                content = files_content[file_path]
+                
+                # Check for MySQL packages
+                if re.search(r'mysql-connector|pymysql', content):
+                    db_matches["MySQL"] = db_matches.get("MySQL", 0) + 10
+                    evidence["MySQL"].append(f"Found MySQL dependency in {os.path.basename(file_path)}")
+                
+                # Check for PostgreSQL packages
+                if re.search(r'psycopg2|psycopg2-binary', content):
+                    db_matches["PostgreSQL"] = db_matches.get("PostgreSQL", 0) + 10
+                    evidence["PostgreSQL"].append(f"Found PostgreSQL dependency in {os.path.basename(file_path)}")
+                
+                # Check for MongoDB packages
+                if re.search(r'pymongo|mongoengine', content):
+                    db_matches["MongoDB"] = db_matches.get("MongoDB", 0) + 10
+                    evidence["MongoDB"].append(f"Found MongoDB dependency in {os.path.basename(file_path)}")
+                
+                # Check for Redis packages
+                if re.search(r'redis', content):
+                    db_matches["Redis"] = db_matches.get("Redis", 0) + 10
+                    evidence["Redis"].append(f"Found Redis dependency in {os.path.basename(file_path)}")
+                
+                # Check for Elasticsearch packages
+                if re.search(r'elasticsearch', content):
+                    db_matches["Elasticsearch"] = db_matches.get("Elasticsearch", 0) + 10
+                    evidence["Elasticsearch"].append(f"Found Elasticsearch dependency in {os.path.basename(file_path)}")
+        
+        # Reduce "SQL Database" confidence if specific SQL databases are detected
+        if "SQL Database" in db_matches:
+            specific_sql_dbs = ["MySQL", "PostgreSQL", "SQLite", "SQL Server", "Oracle"]
+            for db in specific_sql_dbs:
+                if db in db_matches and db_matches[db] > db_matches["SQL Database"]:
+                    # If a specific SQL database has higher confidence, reduce the generic "SQL Database" confidence
+                    db_matches["SQL Database"] = db_matches["SQL Database"] // 2
     
     def detect(self, files_content: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
         """
@@ -368,6 +507,9 @@ class DatabaseDetector:
                             db_matches["GraphQL"] += len(matches) * 3
                             evidence["GraphQL"].append(f"GraphQL: {matches[0][:40]}...")
         
+        # Apply context validation to reduce false positives
+        self._apply_context_validation(db_matches, evidence, files_content)
+        
         # Calculate confidence scores and prepare results
         databases = {}
         
@@ -380,7 +522,8 @@ class DatabaseDetector:
                 confidence = min(100, (matches / max_matches) * 100)
                 
                 # Only include databases with reasonable confidence
-                if confidence >= 15:  # Higher threshold for databases to reduce false positives
+                # Increased threshold from 15 to 35 to reduce false positives
+                if confidence >= 35:
                     # Keep only unique evidence and limit to 5 examples
                     unique_evidence = list(set(evidence[db]))[:5]
                     

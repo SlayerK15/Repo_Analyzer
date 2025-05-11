@@ -185,8 +185,167 @@ class ArchitectureDetector:
                 r"@Query", r"@Mutation", r"@Resolver", r"gql`", r"graphql`"
             ],
         }
+        
+        # Framework-specific architecture indicators
+        self.framework_architecture_mapping = {
+            "rails": "MVC",  # Ruby on Rails uses MVC
+            "django": "MVC",  # Django uses MVT which is similar to MVC
+            "laravel": "MVC",  # Laravel uses MVC
+            "asp.net mvc": "MVC",  # ASP.NET MVC uses MVC
+            "spring mvc": "MVC",  # Spring MVC uses MVC
+            "angular": "MVVM",  # Angular uses component architecture with MVVM influence
+            "vue": "MVVM",  # Vue.js uses MVVM
+            "react-redux": "Flux-like",  # React with Redux follows Flux-like pattern
+            "spring boot": "Layered Architecture",  # Spring Boot often uses layered architecture
+            "nestjs": "Layered Architecture",  # NestJS uses modules pattern
+            "express": "REST API",  # Express.js is commonly used for REST APIs
+            "flask": "REST API",  # Flask is commonly used for REST APIs
+            "graphql": "GraphQL API",  # GraphQL frameworks for GraphQL APIs
+            "apollo": "GraphQL API",  # Apollo framework for GraphQL
+            "kubernetes": "Microservices",  # Kubernetes often indicates microservices
+            "docker-compose": "Microservices",  # docker-compose can indicate microservices
+            "kafka": "Event-Driven Architecture",  # Kafka is used for event-driven architecture
+            "rabbitmq": "Event-Driven Architecture"  # RabbitMQ is used for event-driven architecture
+        }
+        
+        # Configuration files indicating specific architectures
+        self.config_architecture_mapping = {
+            "docker-compose.yml": "Microservices",
+            "kubernetes": "Microservices",
+            "k8s": "Microservices",
+            "istio": "Microservices",
+            "consul": "Microservices",
+            "eureka": "Microservices",
+            "zuul": "Microservices",
+            "gateway": "Microservices",
+            "kafka": "Event-Driven Architecture",
+            "rabbitmq": "Event-Driven Architecture",
+            "activemq": "Event-Driven Architecture",
+            "graphql": "GraphQL API",
+            "swagger": "REST API",
+            "openapi": "REST API"
+        }
     
-    def detect(self, files: List[str]) -> Dict[str, Dict[str, Any]]:
+    def _apply_context_validation(self, architecture_matches, architecture_evidence, files, files_content=None):
+        """
+        Apply additional validation to reduce false positives in architecture detection.
+        
+        Args:
+            architecture_matches: Dict of architecture matches
+            architecture_evidence: Dict of evidence for each architecture
+            files: List of file paths
+            files_content: Dict of file contents (optional)
+        """
+        # Check for specific file counts to validate architecture patterns
+        
+        # For MVC, check for balance between models, views, and controllers
+        if "MVC" in architecture_matches:
+            models_count = sum(1 for f in files if 'model' in f.lower() or '/models/' in f.lower())
+            views_count = sum(1 for f in files if 'view' in f.lower() or '/views/' in f.lower())
+            controllers_count = sum(1 for f in files if 'controller' in f.lower() or '/controllers/' in f.lower())
+            
+            # In a true MVC architecture, we should have a reasonable balance
+            # between models, views, and controllers
+            if models_count < 2 or views_count < 2 or controllers_count < 2:
+                # If one of the components is missing or very small, reduce confidence
+                architecture_matches["MVC"] = architecture_matches["MVC"] // 2
+                architecture_evidence["MVC"].append(f"Imbalance in MVC components: Models ({models_count}), Views ({views_count}), Controllers ({controllers_count})")
+        
+        # For MVVM, check for balance between models, views, and viewmodels
+        if "MVVM" in architecture_matches:
+            models_count = sum(1 for f in files if 'model' in f.lower() or '/models/' in f.lower())
+            views_count = sum(1 for f in files if 'view' in f.lower() or '/views/' in f.lower())
+            viewmodels_count = sum(1 for f in files if 'viewmodel' in f.lower() or '/viewmodels/' in f.lower())
+            
+            # In a true MVVM architecture, we should have a reasonable balance
+            if models_count < 2 or views_count < 2 or viewmodels_count < 2:
+                architecture_matches["MVVM"] = architecture_matches["MVVM"] // 2
+                architecture_evidence["MVVM"].append(f"Imbalance in MVVM components: Models ({models_count}), Views ({views_count}), ViewModels ({viewmodels_count})")
+        
+        # For Clean Architecture, check for proper layering
+        if "Clean Architecture" in architecture_matches:
+            entities_count = sum(1 for f in files if 'entity' in f.lower() or '/entities/' in f.lower() or '/domain/model' in f.lower())
+            usecases_count = sum(1 for f in files if 'usecase' in f.lower() or '/usecases/' in f.lower() or '/application/' in f.lower())
+            adapters_count = sum(1 for f in files if 'adapter' in f.lower() or '/adapters/' in f.lower() or '/infrastructure/' in f.lower())
+            
+            if entities_count < 2 or usecases_count < 2 or adapters_count < 2:
+                architecture_matches["Clean Architecture"] = architecture_matches["Clean Architecture"] // 2
+                architecture_evidence["Clean Architecture"].append(
+                    f"Imbalance in Clean Architecture components: Entities ({entities_count}), UseCases ({usecases_count}), Adapters ({adapters_count})"
+                )
+        
+        # For Microservices, validate with stronger evidence
+        if "Microservices" in architecture_matches:
+            # Strong indicators of microservices
+            strong_indicators = [
+                "docker-compose.yml", "docker-compose.yaml", 
+                "kubernetes", "k8s", "helm", "istio",
+                "api-gateway", "service-discovery", "eureka", "consul"
+            ]
+            
+            # Check for presence of these indicators
+            has_strong_indicator = any(any(ind in f for f in files) for ind in strong_indicators)
+            
+            # Check for multiple service directories
+            service_dirs = set()
+            for file_path in files:
+                parts = file_path.split('/')
+                if len(parts) >= 2 and (parts[0] == 'services' or parts[0] == 'microservices'):
+                    service_dirs.add(parts[1])
+            
+            many_services = len(service_dirs) >= 3
+            
+            if not (has_strong_indicator or many_services):
+                architecture_matches["Microservices"] = architecture_matches["Microservices"] // 2
+                architecture_evidence["Microservices"].append("Limited evidence for true microservices architecture")
+        
+        # For Event-Driven Architecture, look for specific evidence
+        if "Event-Driven Architecture" in architecture_matches:
+            event_indicators = [
+                "kafka", "rabbitmq", "activemq", "nats",
+                "eventbus", "event-bus", "event_bus", "events"
+            ]
+            
+            has_event_indicator = any(any(ind in f.lower() for f in files) for ind in event_indicators)
+            
+            if not has_event_indicator:
+                architecture_matches["Event-Driven Architecture"] = architecture_matches["Event-Driven Architecture"] // 2
+                architecture_evidence["Event-Driven Architecture"].append("Limited evidence for true event-driven architecture")
+        
+        # Enhanced detection for REST API architecture
+        if "REST API" in architecture_matches:
+            rest_indicators = [
+                "swagger", "openapi", "endpoints", "controllers", 
+                "api/v1", "api/v2", "resources"
+            ]
+            
+            has_rest_indicator = any(any(ind in f.lower() for f in files) for ind in rest_indicators)
+            
+            # If there are REST indicators, boost the score
+            if has_rest_indicator:
+                architecture_matches["REST API"] += 10
+                architecture_evidence["REST API"].append("Found strong REST API indicators")
+        
+        # Check for overlapping architectures and resolve conflicts
+        # Some architectures are complementary, others are mutually exclusive
+        
+        # MVC and MVVM are generally mutually exclusive
+        if "MVC" in architecture_matches and "MVVM" in architecture_matches:
+            # Keep the one with the higher score
+            if architecture_matches["MVC"] > architecture_matches["MVVM"]:
+                architecture_matches["MVVM"] = architecture_matches["MVVM"] // 3
+            else:
+                architecture_matches["MVC"] = architecture_matches["MVC"] // 3
+        
+        # Feature-based can coexist with others, but check if it's a strong match
+        if "Feature-based architecture" in architecture_matches:
+            # Check if there are actual feature modules
+            feature_dirs = sum(1 for f in files if '/features/' in f or '/modules/' in f)
+            if feature_dirs < 5:  # Arbitrary threshold: at least 5 files in feature directories
+                architecture_matches["Feature-based architecture"] = architecture_matches["Feature-based architecture"] // 2
+                architecture_evidence["Feature-based architecture"].append(f"Only found {feature_dirs} files in feature directories")
+    
+    def detect(self, files: List[str], files_content: Dict[str, str] = None) -> Dict[str, Dict[str, Any]]:
         """
         Detect architecture patterns used in the repository.
         
@@ -195,6 +354,7 @@ class ArchitectureDetector:
         
         Args:
             files: List of file paths in the repository
+            files_content: Dict mapping file paths to their content (optional)
             
         Returns:
             Dict mapping architecture pattern names to dicts containing:
@@ -354,7 +514,27 @@ class ArchitectureDetector:
                     f"Found {len(potential_feature_dirs)} potential feature modules: {', '.join(potential_feature_dirs[:5])}..."
                 )
         
-        # Step 5: Calculate confidence scores
+        # Step 5: Check for code patterns if files_content is provided
+        if files_content:
+            for file_path, content in files_content.items():
+                # Skip large files
+                if len(content) > 500000:  # Skip files over 500KB
+                    continue
+                
+                # Look for code patterns in file content
+                for architecture, patterns in self.code_patterns.items():
+                    for pattern in patterns:
+                        matches = re.findall(pattern, content)
+                        if matches:
+                            architecture_matches[architecture] += len(matches) * 2
+                            architecture_evidence[architecture].append(
+                                f"Code pattern in {os.path.basename(file_path)}: {pattern}"
+                            )
+        
+        # Step 6: Apply additional context validation
+        self._apply_context_validation(architecture_matches, architecture_evidence, files, files_content)
+        
+        # Step 7: Calculate confidence scores
         architectures = {}
         
         if architecture_matches:
@@ -366,7 +546,8 @@ class ArchitectureDetector:
                 confidence = min(100, (matches / max_matches) * 100)
                 
                 # Only include architectures with reasonable confidence
-                if confidence >= 20:  # Higher threshold for architecture patterns
+                # Increased threshold from 20 to 35 to reduce false positives
+                if confidence >= 35:
                     # Keep only unique evidence and limit to 5 examples
                     unique_evidence = list(dict.fromkeys(architecture_evidence[arch]))[:5]
                     

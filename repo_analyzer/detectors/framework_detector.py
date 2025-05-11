@@ -223,6 +223,178 @@ class FrameworkDetector:
                 "pulumi up", "import * as pulumi"
             ]
         }
+        
+        # Define stronger evidence patterns for each framework
+        self.strong_evidence_patterns = {
+            "Django": [
+                r"from\s+django\.", r"import\s+django", r"settings\.py", 
+                r"INSTALLED_APPS", r"MIDDLEWARE", r"urlpatterns"
+            ],
+            "Flask": [
+                r"from\s+flask\s+import", r"app\s*=\s*Flask\(", 
+                r"@app\.route", r"render_template\("
+            ],
+            "FastAPI": [
+                r"from\s+fastapi\s+import", r"app\s*=\s*FastAPI\(",
+                r"@app\.get", r"@app\.post"
+            ],
+            "SQLAlchemy": [
+                r"from\s+sqlalchemy\s+import", r"class\s+\w+\(.*Base\)",
+                r"Base\s*=\s*declarative_base\(\)"
+            ],
+            "React": [
+                r"import\s+React\s+from", r"React\.Component", r"useState\(", 
+                r"useEffect\(", r"class\s+\w+\s+extends\s+React\.Component"
+            ],
+            "Vue.js": [
+                r"import\s+Vue\s+from", r"new\s+Vue\({", r"createApp\(",
+                r"<template>.*<\/template>"
+            ],
+            "Angular": [
+                r"import\s+{\s*Component", r"@Component\({",
+                r"@NgModule\({", r"platformBrowserDynamic\(\)"
+            ],
+            "Express": [
+                r"const\s+express\s*=\s*require\(['\"]express['\"]\)", 
+                r"import\s+express\s+from", r"app\.listen\(\d+",
+                r"app\.(get|post|put|delete)\(['\"]\/\w*['\"]\s*,"
+            ],
+            "Spring": [
+                r"@SpringBootApplication", r"@RestController", r"@Service",
+                r"@Autowired", r"SpringApplication\.run"
+            ],
+            "Rails": [
+                r"class\s+\w+Controller\s*<\s*ApplicationController",
+                r"Rails\.application", r"ActiveRecord::Base",
+                r"rails\s+generate", r"bundle\s+exec\s+rails"
+            ],
+            "Laravel": [
+                r"namespace\s+App\\Http\\Controllers", r"Illuminate\\",
+                r"use\s+Illuminate\\", r"artisan\s+"
+            ],
+            "TensorFlow": [
+                r"import\s+tensorflow\s+as\s+tf", r"tf\.keras", 
+                r"tf\.Session\(\)", r"tf\.placeholder\("
+            ],
+            "PyTorch": [
+                r"import\s+torch", r"torch\.nn", r"torch\.optim",
+                r"class\s+\w+\(nn\.Module\)"
+            ]
+        }
+    
+    def _apply_context_validation(self, framework_matches, files_content):
+        """Apply context-aware validation to reduce false positives in framework detection."""
+        
+        # Check for file extensions that indicate programming languages
+        language_extensions = {
+            "py": "python",
+            "js": "javascript",
+            "jsx": "javascript",
+            "ts": "typescript",
+            "tsx": "typescript",
+            "rb": "ruby",
+            "php": "php",
+            "java": "java",
+            "cs": "csharp",
+            "go": "go",
+            "dart": "dart"
+        }
+        
+        # Count files by language
+        language_counts = defaultdict(int)
+        for file_path in files_content.keys():
+            ext = file_path.split('.')[-1].lower()
+            if ext in language_extensions:
+                language_counts[language_extensions[ext]] += 1
+        
+        # Get dominant languages (those representing >10% of code files)
+        total_files = sum(language_counts.values())
+        dominant_languages = [lang for lang, count in language_counts.items() 
+                           if count > 0.1 * total_files]
+        
+        # Framework to language mapping
+        framework_languages = {
+            "Django": "python",
+            "Flask": "python",
+            "FastAPI": "python",
+            "Pyramid": "python",
+            "Tornado": "python",
+            "SQLAlchemy": "python",
+            "Celery": "python",
+            "React": "javascript",
+            "Vue.js": "javascript",
+            "Angular": "javascript",
+            "Next.js": "javascript",
+            "Express": "javascript",
+            "NestJS": "javascript",
+            "Svelte": "javascript",
+            "jQuery": "javascript",
+            "Spring": "java",
+            "Quarkus": "java",
+            "Micronaut": "java",
+            "Jakarta EE": "java",
+            "Gin": "go",
+            "Echo": "go",
+            "Fiber": "go",
+            "Gorilla": "go",
+            "Rails": "ruby",
+            "Sinatra": "ruby",
+            "Laravel": "php",
+            "Symfony": "php",
+            "CodeIgniter": "php",
+            "ASP.NET": "csharp",
+            "Blazor": "csharp",
+            "Entity Framework": "csharp",
+            "React Native": "javascript",
+            "Flutter": "dart",
+            "TensorFlow": "python",
+            "PyTorch": "python",
+            "Pandas": "python",
+            "NumPy": "python"
+        }
+        
+        # Remove frameworks if their language isn't dominant
+        frameworks_to_check = list(framework_matches.keys())
+        for framework in frameworks_to_check:
+            if framework in framework_languages:
+                required_language = framework_languages[framework]
+                if required_language not in dominant_languages:
+                    # If the framework's language isn't dominant, significantly reduce confidence
+                    framework_matches[framework] = framework_matches[framework] // 5
+        
+        # Check for strong evidence patterns
+        for framework, patterns in self.strong_evidence_patterns.items():
+            if framework in framework_matches:
+                has_strong_evidence = False
+                
+                for _, content in files_content.items():
+                    if any(re.search(pattern, content) for pattern in patterns):
+                        has_strong_evidence = True
+                        break
+                
+                if not has_strong_evidence:
+                    # If no strong evidence is found, significantly reduce confidence
+                    framework_matches[framework] = framework_matches[framework] // 3
+        
+        # Special case for Django: check for django-specific files
+        if "Django" in framework_matches:
+            django_files = ["settings.py", "urls.py", "manage.py"]
+            found_django_files = any(any(df in file_path for file_path in files_content.keys()) 
+                                  for df in django_files)
+            if not found_django_files:
+                framework_matches["Django"] = framework_matches["Django"] // 2
+        
+        # Special case for React: check for JSX/TSX or React hooks
+        if "React" in framework_matches:
+            react_patterns = [r"\.jsx$", r"\.tsx$", r"useState", r"useEffect", r"React\.Component"]
+            found_react_patterns = False
+            for file_path, content in files_content.items():
+                if any(re.search(pattern, file_path) for pattern in react_patterns[:2]) or \
+                   any(re.search(pattern, content) for pattern in react_patterns[2:]):
+                    found_react_patterns = True
+                    break
+            if not found_react_patterns:
+                framework_matches["React"] = framework_matches["React"] // 2
     
     def detect(self, files: List[str], files_content: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
         """
@@ -240,9 +412,11 @@ class FrameworkDetector:
             Dict mapping framework names to dicts containing:
                 - matches: Number of pattern matches found
                 - confidence: Confidence score (0-100)
+                - evidence: List of supporting evidence
         """
         # Track matches for each framework
         framework_matches = defaultdict(int)
+        framework_evidence = defaultdict(list)
         
         # Step 1: Check file paths for framework-specific files and directories
         for file_path in files:
@@ -253,12 +427,15 @@ class FrameworkDetector:
                     # Check if pattern is in filename (exact match)
                     if pattern == filename:
                         framework_matches[framework] += 10  # High weight for exact filename match
+                        framework_evidence[framework].append(f"Found file: {filename}")
                     # Check if pattern is in filename (partial match)
                     elif pattern in filename:
                         framework_matches[framework] += 5  # Medium weight for partial filename match
+                        framework_evidence[framework].append(f"Found pattern in filename: {filename}")
                     # Check if pattern is in file path
                     elif pattern in file_path:
                         framework_matches[framework] += 2  # Lower weight for path match
+                        framework_evidence[framework].append(f"Found pattern in path: {file_path}")
         
         # Step 2: Check file content for framework patterns
         for file_path, content in files_content.items():
@@ -286,8 +463,13 @@ class FrameworkDetector:
                             ("require(" + pattern) in content or 
                             ("include " + pattern) in content):
                             framework_matches[framework] += occurrences * 2
+                            framework_evidence[framework].append(f"Found import: {pattern} in {os.path.basename(file_path)}")
                         else:
                             framework_matches[framework] += occurrences
+                            framework_evidence[framework].append(f"Found pattern: {pattern} in {os.path.basename(file_path)}")
+        
+        # Step 3: Apply context validation to reduce false positives
+        self._apply_context_validation(framework_matches, files_content)
         
         # Calculate confidence scores and prepare results
         frameworks = {}
@@ -302,10 +484,15 @@ class FrameworkDetector:
                 confidence = min(100, (matches / max_matches) * 100)
                 
                 # Only include frameworks with reasonable confidence
-                if confidence >= 10:
+                # Increased threshold from 10 to 35 to reduce false positives
+                if confidence >= 35:
+                    # Keep only unique evidence and limit to 5 examples
+                    unique_evidence = list(dict.fromkeys(framework_evidence[framework]))[:5]
+                    
                     frameworks[framework] = {
                         "matches": matches,
-                        "confidence": round(confidence, 2)
+                        "confidence": round(confidence, 2),
+                        "evidence": unique_evidence
                     }
         
         return frameworks

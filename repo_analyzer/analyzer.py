@@ -1,18 +1,18 @@
 """
-Main RepoAnalyzer class that orchestrates the complete repository analysis.
+Enhanced RepoAnalyzer main class that orchestrates the complete repository analysis.
 
-This module contains the primary RepoAnalyzer class, which coordinates 
-the analysis process by utilizing specialized detectors for different 
-aspects of the technology stack.
+This enhanced version provides better integration of detectors, more rigorous
+validation, and additional context-aware analysis to reduce false positives.
 """
 
 import os
 import logging
 import json
+import time
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Set, Union
 
-# Import detectors
+# Import enhanced detectors
 from repo_analyzer.detectors.language_detector import LanguageDetector
 from repo_analyzer.detectors.framework_detector import FrameworkDetector
 from repo_analyzer.detectors.database_detector import DatabaseDetector
@@ -24,12 +24,13 @@ from repo_analyzer.detectors.testing_detector import TestingDetector
 
 # Import utilities
 from repo_analyzer.utils.file_utils import get_all_files, load_files_content
+from repo_analyzer.config import RepoAnalyzerConfig
 
 logger = logging.getLogger(__name__)
 
 class RepoAnalyzer:
     """
-    Main class for analyzing code repositories.
+    Enhanced main class for analyzing code repositories.
     
     This class coordinates the repository analysis process by:
     1. Scanning all files in the repository
@@ -42,12 +43,13 @@ class RepoAnalyzer:
     8. Recognizing architecture patterns
     9. Discovering testing frameworks
     
-    The analysis results include confidence scores for each detected technology
-    and determine the primary technologies in each category.
+    The enhanced version provides better integration between detectors,
+    more context-aware analysis, and mechanisms to reduce false positives.
     """
     
     def __init__(self, repo_path: str, exclude_dirs: Optional[Set[str]] = None, 
-                 max_file_size: int = 5 * 1024 * 1024, verbose: bool = False):
+                 max_file_size: int = 5 * 1024 * 1024, verbose: bool = False,
+                 config_path: Optional[str] = None):
         """
         Initialize the RepoAnalyzer.
         
@@ -57,16 +59,17 @@ class RepoAnalyzer:
                          (defaults to common directories to ignore)
             max_file_size: Maximum file size in bytes to analyze (default: 5MB)
             verbose: Whether to print verbose output during analysis
+            config_path: Path to configuration file (optional)
         """
         self.repo_path = os.path.abspath(repo_path)
         if not os.path.isdir(self.repo_path):
             raise ValueError(f"Repository path does not exist: {self.repo_path}")
         
-        # Set default excluded directories if none provided
-        self.exclude_dirs = exclude_dirs or {
-            '.git', 'node_modules', 'venv', '.venv', '__pycache__', 
-            'build', 'dist', 'target', 'bin', 'obj'
-        }
+        # Load configuration
+        self.config = RepoAnalyzerConfig(config_path)
+        
+        # Set excluded directories
+        self.exclude_dirs = exclude_dirs or self.config.get_exclude_dirs()
         
         self.max_file_size = max_file_size
         self.verbose = verbose
@@ -105,6 +108,9 @@ class RepoAnalyzer:
         self.analyze_duration = 0
         self.files_analyzed = 0
         self.files_with_content_analyzed = 0
+        
+        # Cache results for cross-detector analysis
+        self._cache = {}
     
     def analyze(self) -> Dict[str, Any]:
         """
@@ -115,7 +121,8 @@ class RepoAnalyzer:
         2. Loading content of files that require deeper analysis
         3. Running specialized detectors for each aspect of the tech stack
         4. Determining primary technologies
-        5. Adding metadata about the analysis
+        5. Cross-validating detections to reduce false positives
+        6. Adding metadata about the analysis
         
         Returns:
             Dict containing the complete tech stack analysis results
@@ -132,6 +139,9 @@ class RepoAnalyzer:
         self.tech_stack["languages"] = self.language_detector.detect(all_files)
         logger.info(f"Detected {len(self.tech_stack['languages'])} programming languages")
         
+        # Cache primary languages for cross-detector validation
+        self._cache["primary_languages"] = self._determine_primary_languages()
+        
         # Step 3: Load content of relevant files for deeper analysis
         files_content = load_files_content(self.repo_path, all_files, self.max_file_size)
         self.files_with_content_analyzed = len(files_content)
@@ -140,6 +150,9 @@ class RepoAnalyzer:
         # Step 4: Detect frameworks
         self.tech_stack["frameworks"] = self.framework_detector.detect(all_files, files_content)
         logger.info(f"Detected {len(self.tech_stack['frameworks'])} frameworks")
+        
+        # Cache primary frameworks for cross-detector validation
+        self._cache["primary_frameworks"] = self._get_highest_confidence_items("frameworks", 1)
         
         # Step 5: Detect databases
         self.tech_stack["databases"] = self.database_detector.detect(files_content)
@@ -160,18 +173,22 @@ class RepoAnalyzer:
         logger.info(f"Detected {len(self.tech_stack['devops'])} DevOps tools")
         
         # Step 9: Detect architecture patterns
-        self.tech_stack["architecture"] = self.architecture_detector.detect(all_files)
+        self.tech_stack["architecture"] = self.architecture_detector.detect(all_files, files_content)
         logger.info(f"Detected {len(self.tech_stack['architecture'])} architecture patterns")
         
         # Step 10: Detect testing frameworks
         self.tech_stack["testing"] = self.testing_detector.detect(all_files, files_content)
         logger.info(f"Detected {len(self.tech_stack['testing'])} testing frameworks")
         
-        # Step 11: Determine primary technologies
+        # Step 11: Cross-validate and refine detections
+        self._cross_validate_detections()
+        logger.info("Performed cross-validation of detections")
+        
+        # Step 12: Determine primary technologies
         self.tech_stack["primary_technologies"] = self._determine_primary_technologies()
         logger.info("Determined primary technologies")
         
-        # Step 12: Add metadata
+        # Step 13: Add metadata
         end_time = datetime.now()
         self.analyze_duration = (end_time - start_time).total_seconds()
         self.tech_stack["metadata"] = {
@@ -185,6 +202,203 @@ class RepoAnalyzer:
         logger.info(f"Analysis completed in {self.analyze_duration:.2f} seconds")
         
         return self.tech_stack
+    
+    def _determine_primary_languages(self) -> List[str]:
+        """
+        Determine primary languages based on confidence scores and usage.
+        
+        Returns:
+            List of primary language names
+        """
+        if not self.tech_stack["languages"]:
+            return []
+        
+        # Find languages with confidence scores
+        langs_with_confidence = []
+        for lang, data in self.tech_stack["languages"].items():
+            if isinstance(data, dict) and "confidence" in data:
+                langs_with_confidence.append((lang, data["confidence"]))
+        
+        # Sort by confidence (highest first)
+        if langs_with_confidence:
+            langs_with_confidence.sort(key=lambda x: x[1], reverse=True)
+            
+            # Get languages with at least 50% of the confidence of the top language
+            top_confidence = langs_with_confidence[0][1]
+            threshold = top_confidence * 0.5
+            
+            return [lang for lang, conf in langs_with_confidence if conf >= threshold]
+        
+        return []
+    
+    def _get_highest_confidence_items(self, category: str, count: int = 3) -> List[str]:
+        """
+        Get the top N items with highest confidence from a category.
+        
+        Args:
+            category: Technology category
+            count: Number of top items to return
+            
+        Returns:
+            List of top technology names
+        """
+        if category not in self.tech_stack or not self.tech_stack[category]:
+            return []
+        
+        # Find items with confidence scores
+        items_with_confidence = []
+        for item, data in self.tech_stack[category].items():
+            if isinstance(data, dict) and "confidence" in data:
+                items_with_confidence.append((item, data["confidence"]))
+        
+        # Sort by confidence (highest first)
+        if items_with_confidence:
+            items_with_confidence.sort(key=lambda x: x[1], reverse=True)
+            
+            # Return top N items
+            return [item for item, _ in items_with_confidence[:count]]
+        
+        return []
+    
+    def _cross_validate_detections(self) -> None:
+        """
+        Cross-validate detections across categories to reduce false positives.
+        
+        This method applies additional context-aware validation by checking
+        relationships between different technologies.
+        """
+        # Get primary languages and frameworks
+        primary_languages = self._cache.get("primary_languages", [])
+        primary_frameworks = self._cache.get("primary_frameworks", [])
+        
+        # Map between languages and expected technologies
+        language_framework_map = {
+            "Python": ["Django", "Flask", "FastAPI", "PyTorch", "TensorFlow", "Pandas", "NumPy"],
+            "JavaScript": ["React", "Vue.js", "Angular", "Express", "Next.js", "Node.js", "jQuery"],
+            "TypeScript": ["React", "Vue.js", "Angular", "Express", "Next.js", "Node.js"],
+            "Java": ["Spring", "Hibernate", "Jakarta EE", "Maven", "Gradle"],
+            "C#": ["ASP.NET", "Entity Framework", ".NET", "Blazor"],
+            "PHP": ["Laravel", "Symfony", "CodeIgniter", "Composer"],
+            "Ruby": ["Rails", "Sinatra", "RubyGems", "Bundler"],
+            "Go": ["Gin", "Echo", "Fiber", "Gorilla", "Go Modules"],
+        }
+        
+        # Map between languages and build systems/package managers
+        language_build_map = {
+            "Python": ["setuptools", "pip", "Poetry", "Pipenv", "Conda"],
+            "JavaScript": ["npm", "Yarn", "Webpack", "Babel", "Rollup", "esbuild", "swc"],
+            "TypeScript": ["npm", "Yarn", "Webpack", "Babel", "Rollup", "tsc", "esbuild", "swc"],
+            "Java": ["Maven", "Gradle", "Ant"],
+            "C#": ["MSBuild", "NuGet"],
+            "PHP": ["Composer"],
+            "Ruby": ["Bundler", "RubyGems", "Rake"],
+            "Go": ["Go Modules"],
+        }
+        
+        # Validate frameworks against languages
+        for framework, details in list(self.tech_stack["frameworks"].items()):
+            is_valid = False
+            
+            # Check if framework is compatible with any primary language
+            for lang in primary_languages:
+                if lang in language_framework_map and framework in language_framework_map[lang]:
+                    is_valid = True
+                    break
+            
+            # If framework is incompatible with all primary languages, reduce confidence
+            if not is_valid and primary_languages:
+                if details["confidence"] < 80:  # Allow high confidence frameworks to remain
+                    # Either reduce confidence or remove if already low
+                    if details["confidence"] > 40:
+                        self.tech_stack["frameworks"][framework]["confidence"] = details["confidence"] / 2
+                        self.tech_stack["frameworks"][framework]["evidence"].append(
+                            f"Warning: Framework may not be compatible with detected languages: {', '.join(primary_languages)}"
+                        )
+                    else:
+                        del self.tech_stack["frameworks"][framework]
+                        logger.debug(f"Removed {framework} - incompatible with languages {primary_languages}")
+        
+        # Validate build systems and package managers against languages
+        for build_system, details in list(self.tech_stack["build_systems"].items()):
+            is_valid = False
+            
+            # Check if build system is compatible with any primary language
+            for lang in primary_languages:
+                if lang in language_build_map and build_system in language_build_map[lang]:
+                    is_valid = True
+                    break
+            
+            # If build system is incompatible with all primary languages, reduce confidence
+            if not is_valid and primary_languages:
+                if details["confidence"] < 80:  # Allow high confidence build systems to remain
+                    # Either reduce confidence or remove if already low
+                    if details["confidence"] > 40:
+                        self.tech_stack["build_systems"][build_system]["confidence"] = details["confidence"] / 2
+                        self.tech_stack["build_systems"][build_system]["evidence"].append(
+                            f"Warning: Build system may not be compatible with detected languages: {', '.join(primary_languages)}"
+                        )
+                    else:
+                        del self.tech_stack["build_systems"][build_system]
+                        logger.debug(f"Removed {build_system} - incompatible with languages {primary_languages}")
+        
+        # Similar validation for package managers
+        for pkg_manager, details in list(self.tech_stack["package_managers"].items()):
+            is_valid = False
+            
+            # Check if package manager is compatible with any primary language
+            for lang in primary_languages:
+                if lang in language_build_map and pkg_manager in language_build_map[lang]:
+                    is_valid = True
+                    break
+            
+            # If package manager is incompatible with all primary languages, reduce confidence
+            if not is_valid and primary_languages:
+                if details["confidence"] < 80:  # Allow high confidence package managers to remain
+                    # Either reduce confidence or remove if already low
+                    if details["confidence"] > 40:
+                        self.tech_stack["package_managers"][pkg_manager]["confidence"] = details["confidence"] / 2
+                        self.tech_stack["package_managers"][pkg_manager]["evidence"].append(
+                            f"Warning: Package manager may not be compatible with detected languages: {', '.join(primary_languages)}"
+                        )
+                    else:
+                        del self.tech_stack["package_managers"][pkg_manager]
+                        logger.debug(f"Removed {pkg_manager} - incompatible with languages {primary_languages}")
+        
+        # Validate databases based on frameworks
+        # For example, Django often uses PostgreSQL or SQLite
+        framework_db_map = {
+            "Django": ["PostgreSQL", "SQLite", "MySQL"],
+            "Rails": ["PostgreSQL", "SQLite", "MySQL"],
+            "Laravel": ["MySQL", "PostgreSQL"],
+            "Express": ["MongoDB", "MySQL", "PostgreSQL"],
+            "Spring": ["PostgreSQL", "MySQL", "Oracle", "SQL Server"],
+            "Flask": ["SQLite", "PostgreSQL", "MySQL"],
+        }
+        
+        # Boost confidence for databases that align with detected frameworks
+        for framework in primary_frameworks:
+            if framework in framework_db_map:
+                for db in framework_db_map[framework]:
+                    if db in self.tech_stack["databases"]:
+                        # Boost confidence for aligned databases
+                        current_confidence = self.tech_stack["databases"][db]["confidence"]
+                        self.tech_stack["databases"][db]["confidence"] = min(100, current_confidence * 1.2)
+                        self.tech_stack["databases"][db]["evidence"].append(
+                            f"Compatible with detected framework: {framework}"
+                        )
+        
+        # Final step: remove any technologies with confidence below threshold
+        min_confidence = self.config.get("min_confidence", 15)
+        
+        for category in self.tech_stack:
+            if category in ["metadata", "primary_technologies"]:
+                continue
+                
+            # Filter technologies by confidence
+            self.tech_stack[category] = {
+                tech: details for tech, details in self.tech_stack[category].items()
+                if isinstance(details, dict) and details.get("confidence", 0) >= min_confidence
+            }
     
     def _determine_primary_technologies(self) -> Dict[str, str]:
         """
@@ -284,32 +498,3 @@ class RepoAnalyzer:
                 print("")
                 
         print("=======================================")
-
-
-if __name__ == "__main__":
-    import sys
-    import argparse
-    
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Analyze a code repository to identify its tech stack")
-    parser.add_argument("repo_path", help="Path to the repository to analyze")
-    parser.add_argument("--output", "-o", help="Path to save the analysis results (JSON format)")
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output")
-    args = parser.parse_args()
-    
-    try:
-        # Create and run analyzer
-        analyzer = RepoAnalyzer(args.repo_path, verbose=args.verbose)
-        analyzer.analyze()
-        
-        # Print summary
-        analyzer.print_summary()
-        
-        # Save results if output file specified
-        if args.output:
-            output_file = analyzer.save_results(args.output)
-            print(f"\nAnalysis results saved to: {output_file}")
-        
-    except Exception as e:
-        print(f"Error analyzing repository: {str(e)}")
-        sys.exit(1)
