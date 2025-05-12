@@ -1,0 +1,81 @@
+[tool.poetry]
+name = "tech-extraction-system"
+version = "0.1.0"
+description = "A comprehensive technology extraction system for codebase analysis"
+authors = ["Your Name <your.email@example.com>"]
+readme = "README.md"
+packages = [{include = "tech_extraction", from = "src"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.105.0"
+uvicorn = "^0.24.0"
+pydantic = "^2.5.0"
+sqlalchemy = "^2.0.23"
+alembic = "^1.12.1"
+psycopg2-binary = "^2.9.9"
+redis = "^5.0.1"
+openai = "^1.3.6"
+anthropic = "^0.7.0"
+langchain = "^0.0.335"
+tiktoken = "^0.5.1"
+tree-sitter = "^0.20.2"
+pydriller = "^2.5"
+networkx = "^3.2.1"
+pandas = "^2.1.3"
+numpy = "^1.26.2"
+plotly = "^5.18.0"
+dash = "^2.14.1"
+python-magic = "^0.4.27"
+astroid = "^3.0.1"
+semver = "^3.0.1"
+aiohttp = "^3.9.1"
+pyyaml = "^6.0.1"
+jinja2 = "^3.1.2"
+rich = "^13.7.0"
+tqdm = "^4.66.1"
+pydantic-settings = "^2.9.1"
+toml = "^0.10.2"
+matplotlib = "^3.10.3"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.3"
+pytest-cov = "^4.1.0"
+black = "^23.11.0"
+isort = "^5.12.0"
+mypy = "^1.7.1"
+flake8 = "^6.1.0"
+pre-commit = "^3.5.0"
+
+[tool.poetry.scripts]
+tech-extract = "tech_extraction.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
+[tool.mypy]
+python_version = "3.11"
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+strict_optional = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+python_classes = "Test*"

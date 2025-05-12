@@ -1,152 +1,174 @@
-# RepoAnalyzer
+# Technology Extraction System
 
-**RepoAnalyzer** is a Python library that analyzes code repositories to identify their complete technology stack. It provides detailed information about programming languages, frameworks, databases, build systems, frontend technologies, DevOps tools, architecture patterns, and testing frameworks used in a project.
+A comprehensive system for analyzing codebases and detecting technologies, frameworks, libraries, and architectural patterns used in software projects.
+
+## Overview
+
+The Technology Extraction System analyzes source code repositories to identify:
+
+- Programming languages
+- Frameworks and libraries
+- Database technologies
+- API patterns
+- Architectural patterns
+- Build tools and dependencies
+
+It uses a combination of static analysis techniques and AI-powered detection to provide accurate and comprehensive results with confidence scores.
 
 ## Features
 
-- **Programming Language Detection**: Identifies languages used in the repository with confidence scores
-- **Framework Detection**: Recognizes web frameworks, backend frameworks, and libraries
-- **Database Technology Detection**: Identifies SQL and NoSQL database technologies
-- **Build System & Package Manager Identification**: Detects build tools and dependency management systems
-- **Frontend Technology Recognition**: Identifies frontend frameworks, CSS frameworks, state management libraries, etc.
-- **DevOps Tool Analysis**: Detects containerization, CI/CD, infrastructure as code, monitoring tools
-- **Architecture Pattern Recognition**: Identifies architectural patterns like MVC, MVVM, microservices, etc.
-- **Testing Framework Detection**: Recognizes testing libraries, frameworks, and test patterns
+- **Intelligent File Collection**: Efficiently scans and samples large repositories
+- **Language Detection**: Identifies programming languages with confidence scores
+- **Dependency Analysis**: Parses package manifest files and analyzes import statements
+- **Framework Pattern Recognition**: Detects framework-specific patterns and signatures
+- **Architectural Pattern Recognition**: Identifies design patterns and system architectures
+- **Evidence-Based Confidence Scoring**: Calculates confidence scores based on multiple evidence types
+- **False Positive Mitigation**: Applies validation rules to reduce false positives
+- **Multiple Output Formats**: Generates reports in JSON, Markdown, HTML, and CSV
+- **Interactive Visualizations**: Creates charts and graphs of technology relationships
+- **Parallel Processing**: Efficiently processes files in parallel
+- **Caching**: Multi-level caching system for improved performance
+- **Cost Optimization**: Manages AI API usage for optimal cost-performance balance
+- **REST API**: Full-featured API for integration with other systems
 
 ## Installation
 
-You can install the package using pip:
-
 ```bash
-pip install repo-analyzer
-```
+# Clone the repository
+git clone https://github.com/yourusername/tech-extraction-system.git
+cd tech-extraction-system
 
-Or install directly from the source code:
+# Create a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows, use: venv\Scripts\activate
 
-```bash
-git clone https://github.com/yourusername/repo-analyzer.git
-cd repo-analyzer
-pip install -e .
+# Install dependencies
+pip install poetry
+poetry install
 ```
 
 ## Usage
 
-### Command Line
-
-The simplest way to use RepoAnalyzer is through the command line:
+### Command Line Interface
 
 ```bash
-repo-analyzer /path/to/your/repository
-```
+# Analyze a repository
+tech-extract /path/to/repo --output-dir ./results --format html
 
-This will analyze the repository and print a summary of the detected technology stack to the console. You can also save the results to a JSON file:
-
-```bash
-repo-analyzer /path/to/your/repository --output results.json
+# Options
+tech-extract /path/to/repo \
+  --output-dir ./results \
+  --format html \
+  --confidence-threshold 60 \
+  --detail-level high \
+  --visualizations \
+  --cost-mode balanced
 ```
 
 ### Python API
 
-You can also use RepoAnalyzer in your Python code:
-
 ```python
-from repo_analyzer import RepoAnalyzer
+from tech_extraction.cli import analyze_repository
 
-# Create an analyzer instance
-analyzer = RepoAnalyzer('/path/to/your/repository', verbose=True)
+# Analyze a repository
+technologies = analyze_repository(
+    repo_path="/path/to/repo",
+    output_dir="./results",
+    confidence_threshold=60.0,
+    include_evidence=True,
+    detail_level="medium",
+    output_format="json",
+    visualizations=True,
+    cost_mode="balanced"
+)
 
-# Run the analysis
-tech_stack = analyzer.analyze()
-
-# Print a summary
-analyzer.print_summary()
-
-# Save results to a file
-analyzer.save_results('results.json')
-
-# Access specific components
-languages = tech_stack.get('languages', {})
-frameworks = tech_stack.get('frameworks', {})
-databases = tech_stack.get('databases', {})
-primary_tech = tech_stack.get('primary_technologies', {})
-
-# Get the primary language
-primary_language = primary_tech.get('languages')
-print(f"Primary language: {primary_language}")
+# Process results
+for tech in technologies:
+    print(f"{tech.name}: {tech.confidence}% confidence")
 ```
 
-## Example Output
+### REST API
 
-Here's an example of the summary output:
+```bash
+# Start the API server
+uvicorn tech_extraction.api.main:app --host 0.0.0.0 --port 8000
 
+# Or use Docker
+docker-compose up api
 ```
-===== REPOSITORY ANALYSIS SUMMARY =====
 
-Repository: /path/to/example-repo
-Files analyzed: 342
-Analysis time: 1.56 seconds
-Analyzed at: 2025-05-09 15:30:45.120000
+Then access the API at `http://localhost:8000/docs` for interactive Swagger documentation.
 
-Primary Technologies:
-  - Languages: JavaScript
-  - Frameworks: React
-  - Databases: PostgreSQL
-  - Build Systems: Webpack
-  - Package Managers: npm
-  - Frontend: Tailwind CSS
-  - Devops: Docker
-  - Architecture: Feature-based architecture
-  - Testing: Jest
+## Configuration
 
-Languages:
-  - JavaScript (100.0%)
-  - TypeScript (85.3%)
-  - CSS (32.7%)
-  - HTML (15.2%)
+Create a `.env` file in the project root with the following variables:
 
-Frameworks:
-  - React (100.0%)
-  - Express (58.7%)
-  - Next.js (45.2%)
+```env
+# Database
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/tech_extraction
 
-Databases:
-  - PostgreSQL (100.0%)
-  - Redis (45.8%)
+# Redis
+REDIS_URL=redis://localhost:6379/0
 
-Build Systems:
-  - Webpack (100.0%)
-  - Babel (76.5%)
+# AI Providers
+OPENAI_API_KEY=your_openai_api_key
+ANTHROPIC_API_KEY=your_anthropic_api_key
 
-Package Managers:
-  - npm (100.0%)
-  - yarn (35.2%)
+# Logging
+LOG_LEVEL=INFO
 
-Frontend:
-  - Tailwind CSS (100.0%)
-  - Redux (72.3%)
-  - React Query (45.8%)
-
-Devops:
-  - Docker (100.0%)
-  - GitHub Actions (85.6%)
-  - Kubernetes (32.1%)
-
-Architecture:
-  - Feature-based architecture (100.0%)
-  - REST API (78.5%)
-
-Testing:
-  - Jest (100.0%)
-  - React Testing Library (85.2%)
-  - Cypress (42.3%)
-
-=======================================
+# API
+ROOT_PATH=http://localhost:8000
 ```
+
+## Architecture
+
+The system is organized into several major components:
+
+1. **Core System Components**: File collection and language detection
+2. **Dependency Analysis Pipeline**: Package manifest parsing and import analysis
+3. **Framework Pattern Recognition**: Detection of framework signatures and patterns
+4. **AI Integration Layer**: Dynamic prompt generation and AI integration
+5. **Evidence Processing System**: Evidence collection and confidence scoring
+6. **Results Processing Pipeline**: Technology aggregation and output generation
+7. **Performance Optimization**: Caching, parallel processing, and cost management
+8. **API and User Interfaces**: REST API, CLI, and visualizations
+
+## Docker Deployment
+
+```bash
+# Build and start all services
+docker-compose up -d
+
+# Or just the API
+docker-compose up api
+
+# Or just the worker
+docker-compose up worker
+```
+
+## Development
+
+```bash
+# Install development dependencies
+poetry install --with dev
+
+# Run tests
+pytest
+
+# Run linters
+black src tests
+isort src tests
+mypy src
+
+# Run with hot reloading
+uvicorn tech_extraction.api.main:app --reload
+```
+
+## License
+
+[MIT License](LICENSE)
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.

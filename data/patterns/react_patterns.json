@@ -1,0 +1,15 @@
+{
+  "framework": "react",
+  "patterns": [
+    {
+      "name": "React import",
+      "pattern": "import\\s+(?:\\*\\s+as\\s+)?React(?:,|\\s|$)",
+      "file_patterns": ["*.jsx", "*.tsx", "*.js", "*.ts"],
+      "type": "REGEX",
+      "category": "IMPORT",
+      "is_definitive": true,
+      "weight": 1.0,
+      "example": "import React from 'react';"
+    }
+  ]
+}
